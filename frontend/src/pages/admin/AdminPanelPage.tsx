@@ -36,9 +36,12 @@ export function AdminPanelPage() {
     users,
     currentUser,
     isKepengurusan,
+    canManageMembership,
     currentDivision,
     loginWithCredentials,
-    createUserAccount,
+    registerMemberAccount,
+    appointMemberAsPengurus,
+    toggleMemberActiveStatus,
     deleteUserAccount,
     createProker,
     updateProker,
@@ -54,7 +57,6 @@ export function AdminPanelPage() {
     deleteAspiration,
     createNewsArticle,
     deleteNewsArticle,
-    addMember,
     deleteMember,
   } = useHimakalaStore();
 
@@ -66,12 +68,23 @@ export function AdminPanelPage() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
 
-  // State Kelola Akun Pengguna (Tabel `pengguna` & Enum `peran_pengguna`)
+  // State Tambah Anggota Aktif HIMAKALA (Khusus Ketua & Sekretaris)
   const [usrNama, setUsrNama] = useState("");
+  const [usrNrp, setUsrNrp] = useState("");
+  const [usrWa, setUsrWa] = useState("");
   const [usrEmail, setUsrEmail] = useState("");
   const [usrPassword, setUsrPassword] = useState("");
-  const [usrPeran, setUsrPeran] = useState<PeranPengguna>("pengurus_divisi");
-  const [usrDivisi, setUsrDivisi] = useState("");
+  const [usrConfirmPassword, setUsrConfirmPassword] = useState("");
+  const [usrError, setUsrError] = useState("");
+
+  // State Pengangkatan Pengurus dari Anggota Aktif (Khusus Ketua & Sekretaris)
+  const [selectedCandidateId, setSelectedCandidateId] = useState("");
+  const [usrPeran, setUsrPeran] =
+    useState<Exclude<PeranPengguna, "anggota">>("pengurus_divisi");
+  const [memJabatan, setMemJabatan] = useState("");
+  const [memProdi, setMemProdi] = useState<ProdiLamongan>("Teknik Informatika");
+  const [memDivisi, setMemDivisi] = useState("div-bph");
+  const [memError, setMemError] = useState("");
 
   // State CRUD Proker
   const [editingProkerId, setEditingProkerId] = useState<string | null>(null);
@@ -95,12 +108,6 @@ export function AdminPanelPage() {
   const [docVisibilitas, setDocVisibilitas] =
     useState<VisibilitasDokumen>("publik");
 
-  // State Pengurus
-  const [memNama, setMemNama] = useState("");
-  const [memJabatan, setMemJabatan] = useState("");
-  const [memProdi, setMemProdi] = useState<ProdiLamongan>("Teknik Informatika");
-  const [memDivisi, setMemDivisi] = useState("div-bph");
-
   // State Berita Medinfo
   const [newsJudul, setNewsJudul] = useState("");
   const [newsKategori, setNewsKategori] =
@@ -113,20 +120,29 @@ export function AdminPanelPage() {
   );
   const [feedbackBanner, setFeedbackBanner] = useState("");
 
-  // Jika User Biasa (Anggota HIMAKALA) mengakses /admin -> Tampilkan Form Login Biasa (Email & Password)
+  // Jika User Biasa (Anggota HIMAKALA) atau Tamu mengakses /admin -> Tampilkan Form Login Kepengurusan
   if (!isKepengurusan || !currentUser) {
     return (
       <div className="mx-auto max-w-sm rounded-[24px] bg-white p-6 ink-card">
         <span className="rounded-full bg-[#FAD956] px-3 py-1 text-xs font-bold text-[#0B1938] ink-border">
-          Login Kepengurusan
+          Workspace Pengurus HIMAKALA
         </span>
         <h1 className="mt-3 font-display text-xl font-bold text-[#0B1938]">
           Masuk ke Workspace
         </h1>
         <p className="mt-1 text-xs text-[#3B4E73]">
-          Role (`peran_pengguna`) dan akses divisi ditentukan otomatis dari
-          database.
+          Halaman ini khusus Pengurus HIMAKALA. Syarat menjadi Pengurus adalah
+          berstatus <strong>Anggota Aktif HIMAKALA</strong> dan diangkat oleh{" "}
+          <strong>Ketua HIMAKALA</strong> atau <strong>Sekretaris</strong>.
         </p>
+
+        {currentUser && currentUser.peran === "anggota" && (
+          <div className="mt-3 rounded-xl bg-[#C8ECFA] p-2.5 text-[11px] font-medium text-[#0B1938]">
+            Anda sedang login sebagai Anggota Biasa ({currentUser.nama} - NRP{" "}
+            {currentUser.nrp || "-"}). Hubungi Ketua atau Sekretaris BPH jika
+            Anda bertugas sebagai pengurus periode ini.
+          </div>
+        )}
 
         <form
           onSubmit={async (e) => {
@@ -144,15 +160,15 @@ export function AdminPanelPage() {
               htmlFor="page-login-email"
               className="block text-xs font-bold text-[#0B1938]"
             >
-              Email
+              Email Kampus / Email Pengurus / NRP
             </label>
             <input
               id="page-login-email"
-              type="email"
+              type="text"
               required
               value={loginEmail}
               onChange={(e) => setLoginEmail(e.target.value)}
-              placeholder="nama@himakala.ac.id"
+              placeholder="mozakiibrahim@it.student.pens.ac.id atau NRP"
               className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-2 text-xs text-[#0B1938] ink-border"
             />
           </div>
@@ -934,144 +950,281 @@ export function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 5: DATA PENGURUS 6 DIVISI (SEKRETARIS, PSDM, & KETUA HIMAKALA) */}
+      {/* TAB 5: ANGKAT PENGURUS 6 DIVISI DARI ANGGOTA AKTIF (KHUSUS KETUA & SEKRETARIS) */}
       {activeTab === "pengurus" && (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!memNama.trim() || !memJabatan.trim()) return;
-              addMember({
-                nama: memNama,
-                jabatan: memJabatan,
-                prodi: memProdi,
-                id_divisi: resolvedMemDivisi,
-              });
-              setMemNama("");
-              setMemJabatan("");
-              setFeedbackBanner("Pengurus berhasil ditambahkan.");
-            }}
-            className="ink-card space-y-3 bg-white p-5 lg:col-span-5"
-          >
-            <h2 className="font-display text-base font-bold text-[#0B1938]">
-              Tambah Pengurus Divisi
-            </h2>
-            <div>
-              <label
-                htmlFor="mem-divisi"
-                className="block text-xs font-bold text-[#0B1938]"
-              >
-                Divisi
-              </label>
-              <select
-                id="mem-divisi"
-                value={resolvedMemDivisi}
-                onChange={(e) => setMemDivisi(e.target.value)}
-                className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs font-bold text-[#0B1938] ink-border"
-              >
-                {divisions.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.nama}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label
-                htmlFor="mem-nama"
-                className="block text-xs font-bold text-[#0B1938]"
-              >
-                Nama Lengkap
-              </label>
-              <input
-                id="mem-nama"
-                type="text"
-                required
-                value={memNama}
-                onChange={(e) => setMemNama(e.target.value)}
-                className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="mem-jabatan"
-                className="block text-xs font-bold text-[#0B1938]"
-              >
-                Jabatan (Misal: Ketua BPH / Ketua Divisi / Staf)
-              </label>
-              <input
-                id="mem-jabatan"
-                type="text"
-                required
-                value={memJabatan}
-                onChange={(e) => setMemJabatan(e.target.value)}
-                className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="mem-prodi"
-                className="block text-xs font-bold text-[#0B1938]"
-              >
-                Program Studi
-              </label>
-              <select
-                id="mem-prodi"
-                value={memProdi}
-                onChange={(e) => setMemProdi(e.target.value as ProdiLamongan)}
-                className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs font-bold text-[#0B1938] ink-border"
-              >
-                <option value="Teknik Informatika">Teknik Informatika</option>
-                <option value="Multimedia Broadcasting">
-                  Multimedia Broadcasting
-                </option>
-              </select>
-            </div>
-            <button
-              type="submit"
-              className="w-full min-h-[40px] rounded-xl bg-[#026E9C] px-4 py-2 text-xs font-bold text-white ink-border"
-            >
-              Simpan Pengurus
-            </button>
-          </form>
-
-          <div className="ink-card space-y-2.5 bg-white p-5 lg:col-span-7">
-            <h2 className="font-display text-base font-bold text-[#0B1938]">
-              Daftar Pengurus ({members.length})
-            </h2>
-            {members.length === 0 ? (
-              <p className="rounded-xl bg-[#F5F8FC] p-6 text-center text-xs text-[#3B4E73] ink-border">
-                Belum ada pengurus yang ditambahkan.
+        <>
+          {!canManageMembership ? (
+            <div className="ink-card bg-[#FEE2E2] p-6 text-center">
+              <h2 className="font-display text-lg font-bold text-[#0B1938]">
+                Akses Terbatas: Khusus Ketua HIMAKALA &amp; Sekretaris
+              </h2>
+              <p className="mt-1 text-xs text-[#0B1938]">
+                Sesuai aturan organisasi, hanya Ketua HIMAKALA dan Sekretaris
+                yang dapat menambah anggota serta mengangkat Anggota Aktif
+                HIMAKALA menjadi Pengurus.
               </p>
-            ) : (
-              members.map((m) => {
-                const div = divisions.find((d) => d.id === m.id_divisi);
-                return (
-                  <div
-                    key={m.id}
-                    className="flex items-center justify-between rounded-2xl bg-[#F5F8FC] p-3.5 ink-border"
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setMemError("");
+                  const candidateId =
+                    selectedCandidateId ||
+                    users.find((u) => u.status === "aktif")?.id ||
+                    "";
+                  if (!candidateId) {
+                    setMemError(
+                      "Pilih calon pengurus dari daftar Anggota Aktif HIMAKALA terlebih dahulu."
+                    );
+                    return;
+                  }
+                  if (!memJabatan.trim()) {
+                    setMemError("Jabatan kepengurusan wajib diisi.");
+                    return;
+                  }
+                  const res = await appointMemberAsPengurus({
+                    userId: candidateId,
+                    peran: usrPeran,
+                    id_divisi: resolvedMemDivisi,
+                    jabatan: memJabatan,
+                    prodi: memProdi,
+                  });
+                  if (!res.ok) {
+                    setMemError(res.error || "Gagal mengangkat pengurus.");
+                    return;
+                  }
+                  setMemJabatan("");
+                  setFeedbackBanner(
+                    "Anggota Aktif berhasil diangkat menjadi Pengurus HIMAKALA."
+                  );
+                }}
+                className="ink-card space-y-3 bg-white p-5 lg:col-span-5"
+              >
+                <h2 className="font-display text-base font-bold text-[#0B1938]">
+                  Angkat Pengurus dari Anggota Aktif
+                </h2>
+                <p className="rounded-xl bg-[#C8ECFA] p-3 text-xs font-medium text-[#0B1938] ink-border">
+                  <strong>Syarat Wajib Pengurus:</strong> Calon pengurus harus
+                  terdaftar sebagai{" "}
+                  <strong>Anggota Aktif HIMAKALA</strong> (memiliki NRP, No. WA,
+                  dan Email Kampus PENS).
+                </p>
+
+                <div>
+                  <label
+                    htmlFor="mem-kandidat"
+                    className="block text-xs font-bold text-[#0B1938]"
                   >
-                    <div>
-                      <p className="font-display text-sm font-bold text-[#0B1938]">
-                        {m.nama}
-                      </p>
-                      <p className="text-xs text-[#3B4E73]">
-                        {m.jabatan} • Divisi {div?.nama} ({m.prodi})
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => deleteMember(m.id)}
-                      className="rounded-xl bg-[#FEE2E2] px-2.5 py-1 text-xs font-bold text-[#0B1938] ink-border"
-                    >
-                      Hapus
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
+                    Pilih Anggota Aktif HIMAKALA
+                  </label>
+                  <select
+                    id="mem-kandidat"
+                    value={
+                      selectedCandidateId ||
+                      users.find((u) => u.status === "aktif")?.id ||
+                      ""
+                    }
+                    onChange={(e) => {
+                      const uid = e.target.value;
+                      setSelectedCandidateId(uid);
+                      const found = users.find((u) => u.id === uid);
+                      if (found?.prodi) setMemProdi(found.prodi);
+                    }}
+                    className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs font-bold text-[#0B1938] ink-border"
+                  >
+                    {users
+                      .filter((u) => u.status === "aktif")
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.nama} ({u.nrp ? `NRP ${u.nrp} • ` : ""}
+                          {u.email})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="mem-peran"
+                    className="block text-xs font-bold text-[#0B1938]"
+                  >
+                    Role Kepengurusan (`peran_pengguna`)
+                  </label>
+                  <select
+                    id="mem-peran"
+                    value={usrPeran}
+                    onChange={(e) =>
+                      setUsrPeran(
+                        e.target.value as Exclude<PeranPengguna, "anggota">
+                      )
+                    }
+                    className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs font-bold text-[#0B1938] ink-border"
+                  >
+                    <option value="pengurus_divisi">
+                      pengurus_divisi (Pengurus / Staf Divisi)
+                    </option>
+                    <option value="ketua_divisi">
+                      ketua_divisi (Ketua Divisi)
+                    </option>
+                    <option value="sekretaris">
+                      sekretaris (Sekretaris BPH)
+                    </option>
+                    <option value="bendahara">bendahara (Bendahara BPH)</option>
+                    <option value="ketua_himakala">
+                      ketua_himakala (Ketua HIMAKALA / Ketua BPH)
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="mem-divisi"
+                    className="block text-xs font-bold text-[#0B1938]"
+                  >
+                    Divisi Penempatan (6 Divisi)
+                  </label>
+                  <select
+                    id="mem-divisi"
+                    value={
+                      usrPeran === "ketua_himakala" ||
+                      usrPeran === "sekretaris" ||
+                      usrPeran === "bendahara"
+                        ? divisions.find((d) => d.slug === "bph")?.id ||
+                          resolvedMemDivisi
+                        : resolvedMemDivisi
+                    }
+                    disabled={
+                      usrPeran === "ketua_himakala" ||
+                      usrPeran === "sekretaris" ||
+                      usrPeran === "bendahara"
+                    }
+                    onChange={(e) => setMemDivisi(e.target.value)}
+                    className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs font-bold text-[#0B1938] ink-border disabled:opacity-70"
+                  >
+                    {divisions.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.nama}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="mem-jabatan"
+                    className="block text-xs font-bold text-[#0B1938]"
+                  >
+                    Jabatan Kepengurusan
+                  </label>
+                  <input
+                    id="mem-jabatan"
+                    type="text"
+                    required
+                    value={memJabatan}
+                    onChange={(e) => setMemJabatan(e.target.value)}
+                    placeholder="Contoh: Ketua Divisi RSTEK / Staf Luar Negeri"
+                    className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="mem-prodi"
+                    className="block text-xs font-bold text-[#0B1938]"
+                  >
+                    Program Studi
+                  </label>
+                  <select
+                    id="mem-prodi"
+                    value={memProdi}
+                    onChange={(e) =>
+                      setMemProdi(e.target.value as ProdiLamongan)
+                    }
+                    className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs font-bold text-[#0B1938] ink-border"
+                  >
+                    <option value="Teknik Informatika">
+                      Teknik Informatika
+                    </option>
+                    <option value="Multimedia Broadcasting">
+                      Multimedia Broadcasting
+                    </option>
+                  </select>
+                </div>
+
+                {memError && (
+                  <p
+                    role="alert"
+                    className="rounded-xl bg-[#FEE2E2] p-2.5 text-xs font-bold text-[#0B1938]"
+                  >
+                    {memError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full min-h-[40px] rounded-xl bg-[#026E9C] px-4 py-2 text-xs font-bold text-white ink-border hover:bg-[#01587E]"
+                >
+                  Tetapkan Sebagai Pengurus
+                </button>
+              </form>
+
+              <div className="ink-card space-y-2.5 bg-white p-5 lg:col-span-7">
+                <h2 className="font-display text-base font-bold text-[#0B1938]">
+                  Daftar Pengurus Terverifikasi ({members.length})
+                </h2>
+                {members.length === 0 ? (
+                  <p className="rounded-xl bg-[#F5F8FC] p-6 text-center text-xs text-[#3B4E73] ink-border">
+                    Belum ada pengurus yang diangkat pada struktur periode ini.
+                    Pilih dari daftar Anggota Aktif di sebelah kiri.
+                  </p>
+                ) : (
+                  members.map((m) => {
+                    const div = divisions.find((d) => d.id === m.id_divisi);
+                    return (
+                      <div
+                        key={m.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-[#F5F8FC] p-3.5 ink-border"
+                      >
+                        <div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-full bg-[#0B1938] px-2.5 py-0.5 text-[10px] font-bold text-white">
+                              Divisi {div?.nama || "BPH"}
+                            </span>
+                            <span className="rounded-full bg-[#CCF2EA] px-2.5 py-0.5 text-[10px] font-bold text-[#0B1938] ink-border">
+                              Anggota Aktif
+                            </span>
+                          </div>
+                          <p className="mt-1 font-display text-sm font-bold text-[#0B1938]">
+                            {m.nama}{" "}
+                            {m.nrp && (
+                              <span className="text-xs font-semibold text-[#3B4E73]">
+                                (NRP: {m.nrp})
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-xs text-[#3B4E73]">
+                            {m.jabatan} • {m.prodi}
+                            {m.email ? ` • ${m.email}` : ""}
+                            {m.no_wa ? ` • WA: ${m.no_wa}` : ""}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => deleteMember(m.id)}
+                          className="rounded-xl bg-[#FEE2E2] px-2.5 py-1 text-xs font-bold text-[#0B1938] ink-border"
+                        >
+                          Berhentikan
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* TAB 6: PUBLIKASI BERITA (MEDINFO & KETUA HIMAKALA) */}
@@ -1263,167 +1416,251 @@ export function AdminPanelPage() {
         </div>
       )}
 
-      {/* TAB 8: KELOLA AKUN PENGGUNA DATABASE (`public.pengguna` & Enum `peran_pengguna`) */}
+      {/* TAB 8: TAMBAH & KELOLA ANGGOTA AKTIF HIMAKALA (KHUSUS KETUA & SEKRETARIS) */}
       {activeTab === "pengguna" && (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!usrNama.trim() || !usrEmail.trim() || !usrPassword.trim())
-                return;
-              const resolvedDivId =
-                usrPeran === "anggota"
-                  ? null
-                  : usrDivisi || divisions[0]?.id || null;
-              await createUserAccount({
-                nama: usrNama,
-                email: usrEmail,
-                password: usrPassword,
-                peran: usrPeran,
-                id_divisi: resolvedDivId,
-              });
-              setUsrNama("");
-              setUsrEmail("");
-              setUsrPassword("");
-              setFeedbackBanner("Akun pengguna berhasil disimpan ke database.");
-            }}
-            className="ink-card space-y-3 bg-white p-5 lg:col-span-5"
-          >
-            <h2 className="font-display text-base font-bold text-[#0B1938]">
-              Tambah Akun Pengguna
-            </h2>
-            <div>
-              <label
-                htmlFor="usr-nama"
-                className="block text-xs font-bold text-[#0B1938]"
-              >
-                Nama Pengguna
-              </label>
-              <input
-                id="usr-nama"
-                type="text"
-                required
-                value={usrNama}
-                onChange={(e) => setUsrNama(e.target.value)}
-                className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
-              />
+        <>
+          {!canManageMembership ? (
+            <div className="ink-card bg-[#FEE2E2] p-6 text-center">
+              <h2 className="font-display text-lg font-bold text-[#0B1938]">
+                Akses Terbatas: Khusus Ketua HIMAKALA &amp; Sekretaris
+              </h2>
+              <p className="mt-1 text-xs text-[#0B1938]">
+                Hanya Ketua HIMAKALA dan Sekretaris yang berwenang menambahkan
+                dan mengelola data Anggota Aktif HIMAKALA.
+              </p>
             </div>
-            <div>
-              <label
-                htmlFor="usr-email"
-                className="block text-xs font-bold text-[#0B1938]"
+          ) : (
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setUsrError("");
+                  const res = await registerMemberAccount({
+                    nama: usrNama,
+                    nrp: usrNrp,
+                    no_wa: usrWa,
+                    email: usrEmail,
+                    password: usrPassword,
+                    confirmPassword: usrConfirmPassword,
+                    autoLogin: false,
+                  });
+                  if (!res.ok) {
+                    setUsrError(res.error || "Gagal menambahkan anggota.");
+                    return;
+                  }
+                  setUsrNama("");
+                  setUsrNrp("");
+                  setUsrWa("");
+                  setUsrEmail("");
+                  setUsrPassword("");
+                  setUsrConfirmPassword("");
+                  setFeedbackBanner(
+                    "Anggota Aktif HIMAKALA berhasil ditambahkan dan dapat diangkat menjadi pengurus."
+                  );
+                }}
+                className="ink-card space-y-3 bg-white p-5 lg:col-span-5"
               >
-                Email Login
-              </label>
-              <input
-                id="usr-email"
-                type="email"
-                required
-                value={usrEmail}
-                onChange={(e) => setUsrEmail(e.target.value)}
-                className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="usr-pass"
-                className="block text-xs font-bold text-[#0B1938]"
-              >
-                Password Login
-              </label>
-              <input
-                id="usr-pass"
-                type="text"
-                required
-                value={usrPassword}
-                onChange={(e) => setUsrPassword(e.target.value)}
-                className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="usr-peran"
-                className="block text-xs font-bold text-[#0B1938]"
-              >
-                Role Pengguna (Database)
-              </label>
-              <select
-                id="usr-peran"
-                value={usrPeran}
-                onChange={(e) => setUsrPeran(e.target.value as PeranPengguna)}
-                className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs font-bold text-[#0B1938] ink-border"
-              >
-                <option value="anggota">anggota (User Biasa)</option>
-                <option value="pengurus_divisi">
-                  pengurus_divisi (Pengurus Divisi)
-                </option>
-                <option value="ketua_divisi">ketua_divisi (Ketua Divisi)</option>
-                <option value="sekretaris">sekretaris (Sekretaris BPH)</option>
-                <option value="bendahara">bendahara (Bendahara BPH)</option>
-                <option value="ketua_himakala">
-                  ketua_himakala (Ketua HIMAKALA / Ketua BPH)
-                </option>
-              </select>
-            </div>
-            {usrPeran !== "anggota" && (
-              <div>
-                <label
-                  htmlFor="usr-divisi"
-                  className="block text-xs font-bold text-[#0B1938]"
-                >
-                  Divisi
-                </label>
-                <select
-                  id="usr-divisi"
-                  value={usrDivisi || divisions[0]?.id || ""}
-                  onChange={(e) => setUsrDivisi(e.target.value)}
-                  className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs font-bold text-[#0B1938] ink-border"
-                >
-                  {divisions.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.nama}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <button
-              type="submit"
-              className="w-full min-h-[40px] rounded-xl bg-[#026E9C] px-4 py-2 text-xs font-bold text-white ink-border"
-            >
-              Simpan Akun
-            </button>
-          </form>
+                <h2 className="font-display text-base font-bold text-[#0B1938]">
+                  Tambah Anggota Aktif HIMAKALA
+                </h2>
+                <p className="text-xs text-[#3B4E73]">
+                  Khusus Ketua &amp; Sekretaris: Daftarkan mahasiswa sebagai{" "}
+                  <strong className="text-[#0B1938]">
+                    Anggota Aktif HIMAKALA
+                  </strong>{" "}
+                  sebelum diangkat menjadi Pengurus.
+                </p>
 
-          <div className="ink-card space-y-2.5 bg-white p-5 lg:col-span-7">
-            <h2 className="font-display text-base font-bold text-[#0B1938]">
-              Daftar Akun Pengguna ({users.length})
-            </h2>
-            {users.map((u) => (
-              <div
-                key={u.id}
-                className="flex items-center justify-between rounded-2xl bg-[#F5F8FC] p-3.5 ink-border"
-              >
-                <div>
-                  <p className="font-display text-sm font-bold text-[#0B1938]">
-                    {u.nama} ({u.email})
-                  </p>
-                  <p className="text-xs text-[#3B4E73]">
-                    Enum Role: <strong>{u.peran}</strong> • Divisi:{" "}
-                    {u.divisi_slug || "-"}
-                  </p>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="usr-nrp"
+                      className="block text-xs font-bold text-[#0B1938]"
+                    >
+                      NRP Mahasiswa
+                    </label>
+                    <input
+                      id="usr-nrp"
+                      type="text"
+                      required
+                      value={usrNrp}
+                      onChange={(e) => setUsrNrp(e.target.value)}
+                      placeholder="3125500001"
+                      className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="usr-wa"
+                      className="block text-xs font-bold text-[#0B1938]"
+                    >
+                      No. WhatsApp
+                    </label>
+                    <input
+                      id="usr-wa"
+                      type="tel"
+                      required
+                      value={usrWa}
+                      onChange={(e) => setUsrWa(e.target.value)}
+                      placeholder="081234567890"
+                      className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                    />
+                  </div>
                 </div>
+
+                <div>
+                  <label
+                    htmlFor="usr-email"
+                    className="block text-xs font-bold text-[#0B1938]"
+                  >
+                    Email Kampus PENS
+                  </label>
+                  <input
+                    id="usr-email"
+                    type="email"
+                    required
+                    value={usrEmail}
+                    onChange={(e) => setUsrEmail(e.target.value)}
+                    placeholder="mozakiibrahim@it.student.pens.ac.id"
+                    className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="usr-nama"
+                    className="block text-xs font-bold text-[#0B1938]"
+                  >
+                    Nama Lengkap
+                  </label>
+                  <input
+                    id="usr-nama"
+                    type="text"
+                    value={usrNama}
+                    onChange={(e) => setUsrNama(e.target.value)}
+                    placeholder="Mozaki Ibrahim"
+                    className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="usr-pass"
+                      className="block text-xs font-bold text-[#0B1938]"
+                    >
+                      Password
+                    </label>
+                    <input
+                      id="usr-pass"
+                      type="password"
+                      required
+                      value={usrPassword}
+                      onChange={(e) => setUsrPassword(e.target.value)}
+                      placeholder="Min. 6 karakter"
+                      className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="usr-pass2"
+                      className="block text-xs font-bold text-[#0B1938]"
+                    >
+                      Ulangi Password
+                    </label>
+                    <input
+                      id="usr-pass2"
+                      type="password"
+                      required
+                      value={usrConfirmPassword}
+                      onChange={(e) => setUsrConfirmPassword(e.target.value)}
+                      placeholder="Ketik ulang password"
+                      className="mt-1 w-full min-h-[40px] rounded-xl bg-[#F5F8FC] px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                    />
+                  </div>
+                </div>
+
+                {usrError && (
+                  <p
+                    role="alert"
+                    className="rounded-xl bg-[#FEE2E2] p-2.5 text-xs font-bold text-[#0B1938]"
+                  >
+                    {usrError}
+                  </p>
+                )}
+
                 <button
-                  type="button"
-                  onClick={() => deleteUserAccount(u.id)}
-                  className="rounded-xl bg-[#FEE2E2] px-2.5 py-1 text-xs font-bold text-[#0B1938] ink-border"
+                  type="submit"
+                  className="w-full min-h-[40px] rounded-xl bg-[#026E9C] px-4 py-2 text-xs font-bold text-white ink-border hover:bg-[#01587E]"
                 >
-                  Hapus
+                  Simpan Anggota Aktif
                 </button>
+              </form>
+
+              <div className="ink-card space-y-2.5 bg-white p-5 lg:col-span-7">
+                <h2 className="font-display text-base font-bold text-[#0B1938]">
+                  Daftar Anggota &amp; Pengurus HIMAKALA ({users.length})
+                </h2>
+                {users.map((u) => (
+                  <div
+                    key={u.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-[#F5F8FC] p-3.5 ink-border"
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ink-border ${
+                            u.status === "aktif"
+                              ? "bg-[#CCF2EA] text-[#0B1938]"
+                              : "bg-[#FEE2E2] text-[#0B1938]"
+                          }`}
+                        >
+                          {u.status === "aktif"
+                            ? "Anggota Aktif"
+                            : "Nonaktif"}
+                        </span>
+                        <span className="rounded-full bg-[#FAD956] px-2.5 py-0.5 text-[10px] font-bold text-[#0B1938] ink-border">
+                          {getRoleLabel(u.peran)}
+                        </span>
+                      </div>
+                      <p className="mt-1 font-display text-sm font-bold text-[#0B1938]">
+                        {u.nama} ({u.email})
+                      </p>
+                      <p className="text-xs text-[#3B4E73]">
+                        NRP: <strong>{u.nrp || "-"}</strong> • WA:{" "}
+                        <strong>{u.no_wa || "-"}</strong> • Divisi:{" "}
+                        <strong>{u.divisi_slug || "Anggota Biasa"}</strong>
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const res = await toggleMemberActiveStatus(u.id);
+                          if (res.ok) {
+                            setFeedbackBanner(
+                              `Status keanggotaan ${u.nama} diperbarui.`
+                            );
+                          }
+                        }}
+                        className="rounded-xl bg-white px-2.5 py-1 text-xs font-bold text-[#0B1938] ink-border hover:bg-[#FAD956]"
+                      >
+                        {u.status === "aktif" ? "Nonaktifkan" : "Aktifkan"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteUserAccount(u.id)}
+                        className="rounded-xl bg-[#FEE2E2] px-2.5 py-1 text-xs font-bold text-[#0B1938] ink-border"
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -68,12 +68,23 @@ Sistem menggunakan autentikasi **Email & Password** biasa tanpa *dropdown* pemil
 | `anggota` | - | **Hanya Baca (Read-Only)**: Melihat web tanpa bisa mengedit isiannya | Menu lihat web publik |
 | `pengurus_divisi` | Sesuai Divisi | **CRUD Atas Izin Ketua Divisi**: Tambah/ubah/hapus proker divisinya masuk status `menunggu_izin_kabid` | Modul spesifik divisinya (`Medinfo`, `PSDM`, `Dalam Negeri`) |
 | `ketua_divisi` | Sesuai Divisi | **CRUD Tanpa Izin Siapapun** untuk proker divisinya + **Memberi Izin (Setujui/Tolak)** pengajuan dari `pengurus_divisi` | Menu `Izin Divisi` + Modul spesifik divisinya |
-| `sekretaris` | `BPH` | **CRUD Proker Tanpa Izin Siapapun** | Kelola `Dokumen & SK` serta `Data Pengurus` |
+| `sekretaris` | `BPH` | **CRUD Proker Tanpa Izin Siapapun** | Kelola `Dokumen & SK`, `Anggota Aktif`, & `Angkat Pengurus` |
 | `bendahara` | `BPH` | **CRUD Proker Tanpa Izin Siapapun** | Kelola `Kas & Anggaran` |
-| `ketua_himakala` | `BPH` (Ketua BPH) | **Akses Penuh (Full CRUD) Tanpa Izin Siapapun** di seluruh 6 divisi | Semua modul + `Izin Proker` + `Akun Pengguna` |
+| `ketua_himakala` | `BPH` (Ketua BPH) | **Akses Penuh (Full CRUD) Tanpa Izin Siapapun** di seluruh 6 divisi | Semua modul + `Izin Proker` + `Anggota Aktif` + `Angkat Pengurus` |
 
-### 3. Akun Awal untuk Pengujian Kolaborator
-Setelah menjalankan [FULL_SETUP_HIMAKALA.sql](./backend/database/FULL_SETUP_HIMAKALA.sql) atau [02_update_auth_pengguna.sql](./backend/database/02_update_auth_pengguna.sql), kolaborator dapat mencoba login dengan password bawaan `himakala123`:
+### 3. Aturan Registrasi Anggota Biasa & Syarat Pengurus HIMAKALA
+- **Registrasi Mandiri Anggota Biasa (`anggota`)**:
+  Mahasiswa dapat mendaftar sendiri sebagai Anggota Aktif HIMAKALA melalui tombol **Registrasi** menggunakan:
+  1. **NRP** (`8-14` digit angka)
+  2. **No. WhatsApp (WA)** aktif
+  3. **Email Kampus PENS** (`@*.student.pens.ac.id` atau `@student.pens.ac.id`, contoh: `mozakiibrahim@it.student.pens.ac.id`)
+  4. **Password 2 kali** (Password & Konfirmasi Password wajib sama)
+- **Hak Menambah Anggota & Mengangkat Pengurus**:
+  - Hanya **Ketua HIMAKALA (`ketua_himakala`)** dan **Sekretaris (`sekretaris`)** yang dapat menambahkan anggota aktif (`/admin?tab=pengguna`) serta mengangkat pengurus (`/admin?tab=pengurus`).
+  - **Syarat wajib menjadi Pengurus HIMAKALA** adalah kandidat harus terdaftar terlebih dahulu sebagai **Anggota Aktif HIMAKALA** (`status = 'aktif'`).
+
+### 4. Akun Awal untuk Pengujian Kolaborator
+Setelah menjalankan [FULL_SETUP_HIMAKALA.sql](./backend/database/FULL_SETUP_HIMAKALA.sql) atau [03_update_registrasi_anggota_dan_pengurus.sql](./backend/database/03_update_registrasi_anggota_dan_pengurus.sql), kolaborator dapat mencoba login dengan password bawaan `himakala123`:
 - **Ketua HIMAKALA (Ketua BPH)**: `ketua@himakala.ac.id`
 - **Sekretaris BPH**: `sekretaris@himakala.ac.id`
 - **Bendahara BPH**: `bendahara@himakala.ac.id`

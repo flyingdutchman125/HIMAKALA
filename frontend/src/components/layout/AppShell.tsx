@@ -11,6 +11,7 @@ import {
   Newspaper,
   Search,
   ShieldCheck,
+  UserPlus,
   Users,
   Wallet,
   X,
@@ -51,6 +52,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     isKepengurusan,
     currentDivision,
     loginWithCredentials,
+    registerMemberAccount,
     logout,
   } = useHimakalaStore();
 
@@ -58,10 +60,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
 
   const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [authTab, setAuthTab] = useState<"login" | "register">("login");
+
+  // State Login
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // State Registrasi Anggota Biasa (NRP, No WA, Email Kampus, Password 2x)
+  const [regNama, setRegNama] = useState("");
+  const [regNrp, setRegNrp] = useState("");
+  const [regWa, setRegWa] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPass1, setRegPass1] = useState("");
+  const [regPass2, setRegPass2] = useState("");
+  const [regError, setRegError] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -101,23 +116,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         },
         { to: "/admin?tab=keuangan", label: "Kas & Anggaran", icon: Wallet },
         { to: "/admin?tab=dokumen", label: "Dokumen & SK", icon: FileText },
-        { to: "/admin?tab=pengurus", label: "Data Pengurus", icon: Users },
+        { to: "/admin?tab=pengguna", label: "Anggota Aktif", icon: ShieldCheck },
+        { to: "/admin?tab=pengurus", label: "Angkat Pengurus", icon: Users },
         { to: "/admin?tab=berita", label: "Berita Medinfo", icon: Newspaper },
         {
           to: "/admin?tab=aspirasi",
           label: "Aspirasi Anggota",
           icon: MessageSquarePlus,
         },
-        { to: "/admin?tab=pengguna", label: "Akun Pengguna", icon: ShieldCheck },
       ];
     }
 
-    // 2. Sekretaris (Divisi BPH): Bebas CRUD Proker + Dokumen + Pengurus
+    // 2. Sekretaris (Divisi BPH): Bebas CRUD Proker + Dokumen + Tambah Anggota & Angkat Pengurus
     if (role === "sekretaris") {
       return [
         { to: "/admin?tab=proker", label: "CRUD Proker", icon: FolderKanban },
         { to: "/admin?tab=dokumen", label: "Dokumen & SK", icon: FileText },
-        { to: "/admin?tab=pengurus", label: "Data Pengurus", icon: Users },
+        { to: "/admin?tab=pengguna", label: "Anggota Aktif", icon: ShieldCheck },
+        { to: "/admin?tab=pengurus", label: "Angkat Pengurus", icon: Users },
       ];
     }
 
@@ -150,18 +166,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       });
     }
 
-    // Fungsi spesifik tiap divisi:
+    // Fungsi spesifik tiap divisi (Penambahan anggota & pengurus hanya oleh Ketua & Sekretaris):
     if (divSlug === "medinfo") {
       items.push({
         to: "/admin?tab=berita",
         label: "Publikasi Medinfo",
         icon: Newspaper,
-      });
-    } else if (divSlug === "psdm") {
-      items.push({
-        to: "/admin?tab=pengurus",
-        label: "Kader & Pengurus",
-        icon: Users,
       });
     } else if (divSlug === "dalam-negeri") {
       items.push({
@@ -203,6 +213,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }
     } finally {
       setIsLoggingIn(false);
+    }
+  }
+
+  async function handleRegisterSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setRegError("");
+    setIsRegistering(true);
+    try {
+      const res = await registerMemberAccount({
+        nama: regNama,
+        nrp: regNrp,
+        no_wa: regWa,
+        email: regEmail,
+        password: regPass1,
+        confirmPassword: regPass2,
+        autoLogin: true,
+      });
+      if (!res.ok) {
+        setRegError(res.error || "Registrasi gagal.");
+        return;
+      }
+      setLoginModalOpen(false);
+      setRegNama("");
+      setRegNrp("");
+      setRegWa("");
+      setRegEmail("");
+      setRegPass1("");
+      setRegPass2("");
+      navigate("/");
+    } finally {
+      setIsRegistering(false);
     }
   }
 
@@ -329,9 +370,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
 
-          {/* Tombol Bawah Sidebar: Login atau Logout */}
+          {/* Tombol Bawah Sidebar: Login/Registrasi atau Logout */}
           <div className="flex shrink-0 items-center gap-2 md:flex-col md:items-stretch">
-            {isKepengurusan ? (
+            {currentUser ? (
               <button
                 type="button"
                 onClick={() => {
@@ -348,12 +389,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 type="button"
                 onClick={() => {
                   setLoginError("");
+                  setRegError("");
+                  setAuthTab("login");
                   setLoginModalOpen(true);
                 }}
                 className="flex items-center justify-center gap-2 rounded-xl bg-[#FAD956] px-3 py-2 text-[11px] font-bold text-[#0B1938] hover:bg-[#F2C922]"
               >
                 <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
-                <span className="hidden md:inline">Login</span>
+                <span className="hidden md:inline">Login / Daftar</span>
               </button>
             )}
           </div>
@@ -404,7 +447,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </form>
 
               {/* Status Sesi Saat Ini */}
-              {isKepengurusan && currentUser ? (
+              {currentUser ? (
                 <div className="flex items-center gap-2 rounded-full bg-[#FAD956] px-3 py-1 ink-border">
                   <InitialAvatar name={currentUser.nama} bg="bg-white" />
                   <div className="text-left leading-tight">
@@ -412,23 +455,45 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       {currentUser.nama}
                     </p>
                     <p className="text-[10px] font-bold text-[#3B4E73]">
-                      {getRoleLabel(currentUser.peran)} •{" "}
-                      {currentDivision?.nama || "BPH"}
+                      {isKepengurusan
+                        ? `${getRoleLabel(currentUser.peran)} • ${
+                            currentDivision?.nama || "BPH"
+                          }`
+                        : `Anggota Aktif${
+                            currentUser.nrp ? ` • NRP ${currentUser.nrp}` : ""
+                          }`}
                     </p>
                   </div>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLoginError("");
-                    setLoginModalOpen(true);
-                  }}
-                  className="inline-flex min-h-[36px] items-center gap-2 rounded-full bg-white px-3.5 py-1 text-xs font-bold text-[#0B1938] ink-border hover:bg-[#FAD956]"
-                >
-                  <ShieldCheck className="h-3.5 w-3.5 text-[#026E9C]" />
-                  <span>Login</span>
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginError("");
+                      setRegError("");
+                      setAuthTab("register");
+                      setLoginModalOpen(true);
+                    }}
+                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-[#C8ECFA] px-3.5 py-1 text-xs font-bold text-[#0B1938] ink-border hover:bg-[#FAD956]"
+                  >
+                    <UserPlus className="h-3.5 w-3.5 text-[#0B1938]" />
+                    <span>Registrasi</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginError("");
+                      setRegError("");
+                      setAuthTab("login");
+                      setLoginModalOpen(true);
+                    }}
+                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-white px-3.5 py-1 text-xs font-bold text-[#0B1938] ink-border hover:bg-[#FAD956]"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5 text-[#026E9C]" />
+                    <span>Login</span>
+                  </button>
+                </div>
               )}
             </div>
           </header>
@@ -472,7 +537,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      {/* MODAL LOGIN BIASA (EMAIL & PASSWORD TANPA DROPDOWN ROLE) */}
+      {/* MODAL LOGIN & REGISTRASI ANGGOTA BIASA */}
       {loginModalOpen && (
         <div
           role="dialog"
@@ -480,13 +545,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           aria-labelledby="modal-login-title"
           className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B1938]/65 p-4"
         >
-          <div className="w-full max-w-sm rounded-[24px] bg-[#F5F8FC] p-6 ink-card">
+          <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-[24px] bg-[#F5F8FC] p-6 ink-card">
             <div className="flex items-center justify-between">
               <h2
                 id="modal-login-title"
                 className="font-display text-lg font-bold text-[#0B1938]"
               >
-                Login HIMAKALA
+                {authTab === "login"
+                  ? "Masuk Portal HIMAKALA"
+                  : "Registrasi Anggota HIMAKALA"}
               </h2>
               <button
                 type="button"
@@ -497,73 +564,264 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
-            <p className="mt-1 text-xs text-[#3B4E73]">
-              Role dan akses divisi disesuaikan otomatis dari database.
-            </p>
 
-            <form onSubmit={handleLoginSubmit} className="mt-4 space-y-3.5">
-              <div>
-                <label
-                  htmlFor="login-email"
-                  className="block text-xs font-bold text-[#0B1938]"
-                >
-                  Email
-                </label>
-                <input
-                  id="login-email"
-                  type="email"
-                  required
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  placeholder="nama@himakala.ac.id"
-                  className="mt-1 w-full min-h-[42px] rounded-xl bg-white px-3.5 py-2 text-xs text-[#0B1938] ink-border"
-                />
-              </div>
+            {/* Tab Switcher: Login vs Registrasi Anggota */}
+            <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-white p-1 ink-border">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab("login");
+                  setLoginError("");
+                }}
+                className={cn(
+                  "min-h-[36px] rounded-xl text-xs font-bold transition-colors",
+                  authTab === "login"
+                    ? "bg-[#0B1938] text-white"
+                    : "text-[#0B1938] hover:bg-[#FAD956]"
+                )}
+              >
+                Masuk (Login)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab("register");
+                  setRegError("");
+                }}
+                className={cn(
+                  "min-h-[36px] rounded-xl text-xs font-bold transition-colors",
+                  authTab === "register"
+                    ? "bg-[#0B1938] text-white"
+                    : "text-[#0B1938] hover:bg-[#FAD956]"
+                )}
+              >
+                Registrasi Anggota
+              </button>
+            </div>
 
-              <div>
-                <label
-                  htmlFor="login-password"
-                  className="block text-xs font-bold text-[#0B1938]"
-                >
-                  Password
-                </label>
-                <input
-                  id="login-password"
-                  type="password"
-                  required
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="mt-1 w-full min-h-[42px] rounded-xl bg-white px-3.5 py-2 text-xs text-[#0B1938] ink-border"
-                />
-              </div>
-
-              {loginError && (
-                <p
-                  role="alert"
-                  className="rounded-xl bg-[#FEE2E2] p-2.5 text-xs font-bold text-[#0B1938]"
-                >
-                  {loginError}
+            {authTab === "login" ? (
+              <>
+                <p className="mt-2.5 text-xs text-[#3B4E73]">
+                  Masuk menggunakan Email Kampus / Email Akun atau NRP. Role
+                  dan akses divisi disesuaikan otomatis dari database.
                 </p>
-              )}
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setLoginModalOpen(false)}
-                  className="min-h-[40px] rounded-xl bg-white px-4 py-2 text-xs font-bold text-[#0B1938] ink-border"
+                <form onSubmit={handleLoginSubmit} className="mt-4 space-y-3.5">
+                  <div>
+                    <label
+                      htmlFor="login-email"
+                      className="block text-xs font-bold text-[#0B1938]"
+                    >
+                      Email Kampus / NRP
+                    </label>
+                    <input
+                      id="login-email"
+                      type="text"
+                      required
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      placeholder="mozakiibrahim@it.student.pens.ac.id atau NRP"
+                      className="mt-1 w-full min-h-[42px] rounded-xl bg-white px-3.5 py-2 text-xs text-[#0B1938] ink-border"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="login-password"
+                      className="block text-xs font-bold text-[#0B1938]"
+                    >
+                      Password
+                    </label>
+                    <input
+                      id="login-password"
+                      type="password"
+                      required
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="mt-1 w-full min-h-[42px] rounded-xl bg-white px-3.5 py-2 text-xs text-[#0B1938] ink-border"
+                    />
+                  </div>
+
+                  {loginError && (
+                    <p
+                      role="alert"
+                      className="rounded-xl bg-[#FEE2E2] p-2.5 text-xs font-bold text-[#0B1938]"
+                    >
+                      {loginError}
+                    </p>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setLoginModalOpen(false)}
+                      className="min-h-[40px] rounded-xl bg-white px-4 py-2 text-xs font-bold text-[#0B1938] ink-border"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isLoggingIn}
+                      className="min-h-[40px] rounded-xl bg-[#026E9C] px-5 py-2 text-xs font-bold text-white ink-border hover:bg-[#01587E] disabled:opacity-60"
+                    >
+                      {isLoggingIn ? "Memeriksa..." : "Masuk"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <>
+                <p className="mt-2.5 text-xs text-[#3B4E73]">
+                  Registrasi mandiri untuk menjadi{" "}
+                  <strong className="text-[#0B1938]">
+                    Anggota Aktif HIMAKALA
+                  </strong>
+                  . Untuk pengangkatan Pengurus HIMAKALA hanya dapat dilakukan
+                  oleh Ketua dan Sekretaris dari daftar Anggota Aktif.
+                </p>
+
+                <form
+                  onSubmit={handleRegisterSubmit}
+                  className="mt-3.5 space-y-3"
                 >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={isLoggingIn}
-                  className="min-h-[40px] rounded-xl bg-[#026E9C] px-5 py-2 text-xs font-bold text-white ink-border hover:bg-[#01587E] disabled:opacity-60"
-                >
-                  {isLoggingIn ? "Memeriksa..." : "Masuk"}
-                </button>
-              </div>
-            </form>
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="modal-reg-nrp"
+                        className="block text-xs font-bold text-[#0B1938]"
+                      >
+                        NRP Mahasiswa
+                      </label>
+                      <input
+                        id="modal-reg-nrp"
+                        type="text"
+                        required
+                        value={regNrp}
+                        onChange={(e) => setRegNrp(e.target.value)}
+                        placeholder="3125500001"
+                        className="mt-1 w-full min-h-[40px] rounded-xl bg-white px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="modal-reg-wa"
+                        className="block text-xs font-bold text-[#0B1938]"
+                      >
+                        No. WhatsApp
+                      </label>
+                      <input
+                        id="modal-reg-wa"
+                        type="tel"
+                        required
+                        value={regWa}
+                        onChange={(e) => setRegWa(e.target.value)}
+                        placeholder="081234567890"
+                        className="mt-1 w-full min-h-[40px] rounded-xl bg-white px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="modal-reg-email"
+                      className="block text-xs font-bold text-[#0B1938]"
+                    >
+                      Email Kampus PENS
+                    </label>
+                    <input
+                      id="modal-reg-email"
+                      type="email"
+                      required
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      placeholder="mozakiibrahim@it.student.pens.ac.id"
+                      className="mt-1 w-full min-h-[40px] rounded-xl bg-white px-3.5 py-1.5 text-xs text-[#0B1938] ink-border"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="modal-reg-nama"
+                      className="block text-xs font-bold text-[#0B1938]"
+                    >
+                      Nama Lengkap (Opsional)
+                    </label>
+                    <input
+                      id="modal-reg-nama"
+                      type="text"
+                      value={regNama}
+                      onChange={(e) => setRegNama(e.target.value)}
+                      placeholder="Mozaki Ibrahim"
+                      className="mt-1 w-full min-h-[40px] rounded-xl bg-white px-3.5 py-1.5 text-xs text-[#0B1938] ink-border"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="modal-reg-pass1"
+                        className="block text-xs font-bold text-[#0B1938]"
+                      >
+                        Password
+                      </label>
+                      <input
+                        id="modal-reg-pass1"
+                        type="password"
+                        required
+                        value={regPass1}
+                        onChange={(e) => setRegPass1(e.target.value)}
+                        placeholder="Min. 6 karakter"
+                        className="mt-1 w-full min-h-[40px] rounded-xl bg-white px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="modal-reg-pass2"
+                        className="block text-xs font-bold text-[#0B1938]"
+                      >
+                        Ulangi Password
+                      </label>
+                      <input
+                        id="modal-reg-pass2"
+                        type="password"
+                        required
+                        value={regPass2}
+                        onChange={(e) => setRegPass2(e.target.value)}
+                        placeholder="Ketik ulang password"
+                        className="mt-1 w-full min-h-[40px] rounded-xl bg-white px-3 py-1.5 text-xs text-[#0B1938] ink-border"
+                      />
+                    </div>
+                  </div>
+
+                  {regError && (
+                    <p
+                      role="alert"
+                      className="rounded-xl bg-[#FEE2E2] p-2.5 text-xs font-bold text-[#0B1938]"
+                    >
+                      {regError}
+                    </p>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setLoginModalOpen(false)}
+                      className="min-h-[40px] rounded-xl bg-white px-4 py-2 text-xs font-bold text-[#0B1938] ink-border"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isRegistering}
+                      className="min-h-[40px] rounded-xl bg-[#026E9C] px-5 py-2 text-xs font-bold text-white ink-border hover:bg-[#01587E] disabled:opacity-60"
+                    >
+                      {isRegistering ? "Mendaftarkan..." : "Daftar Anggota"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}

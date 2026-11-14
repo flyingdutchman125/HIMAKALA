@@ -706,3 +706,34 @@ ON CONFLICT (email) DO UPDATE SET
   peran = EXCLUDED.peran,
   id_divisi = EXCLUDED.id_divisi,
   password = EXCLUDED.password;
+
+-- ============================================================================
+-- MIGRATION 0005: Registrasi Anggota Biasa (NRP, No. WA, Email Kampus PENS)
+-- & Syarat Pengurus Wajib Anggota Aktif HIMAKALA
+-- ============================================================================
+ALTER TABLE public.pengguna
+  ADD COLUMN IF NOT EXISTS nrp TEXT UNIQUE,
+  ADD COLUMN IF NOT EXISTS no_wa TEXT,
+  ADD COLUMN IF NOT EXISTS prodi TEXT DEFAULT 'Teknik Informatika' CHECK (prodi IN ('Teknik Informatika', 'Multimedia Broadcasting'));
+
+ALTER TABLE public.pengguna
+  DROP CONSTRAINT IF EXISTS chk_pengurus_wajib_anggota_aktif;
+
+ALTER TABLE public.pengguna
+  ADD CONSTRAINT chk_pengurus_wajib_anggota_aktif
+  CHECK (peran = 'anggota' OR status_aktif = true);
+
+UPDATE public.pengguna SET nrp = '3124500001', no_wa = '081234560001', prodi = 'Teknik Informatika' WHERE email = 'ketua@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500002', no_wa = '081234560002', prodi = 'Teknik Informatika' WHERE email = 'sekretaris@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500003', no_wa = '081234560003', prodi = 'Multimedia Broadcasting' WHERE email = 'bendahara@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500004', no_wa = '081234560004', prodi = 'Teknik Informatika' WHERE email = 'kabid.ln@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500005', no_wa = '081234560005', prodi = 'Multimedia Broadcasting' WHERE email = 'pengurus.ln@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500006', no_wa = '081234560006', prodi = 'Teknik Informatika' WHERE email = 'kabid.dn@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500007', no_wa = '081234560007', prodi = 'Multimedia Broadcasting' WHERE email = 'pengurus.dn@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500008', no_wa = '081234560008', prodi = 'Multimedia Broadcasting' WHERE email = 'kabid.medinfo@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500009', no_wa = '081234560009', prodi = 'Multimedia Broadcasting' WHERE email = 'pengurus.medinfo@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500010', no_wa = '081234560010', prodi = 'Teknik Informatika' WHERE email = 'kabid.psdm@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500011', no_wa = '081234560011', prodi = 'Teknik Informatika' WHERE email = 'pengurus.psdm@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500012', no_wa = '081234560012', prodi = 'Teknik Informatika' WHERE email = 'kabid.rstek@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500013', no_wa = '081234560013', prodi = 'Multimedia Broadcasting' WHERE email = 'pengurus.rstek@himakala.ac.id' AND nrp IS NULL;
+UPDATE public.pengguna SET nrp = '3124500099', no_wa = '081234560099', prodi = 'Teknik Informatika' WHERE email IN ('anggota@himakala.ac.id', 'anggota@it.student.pens.ac.id') AND nrp IS NULL;

@@ -58,6 +58,10 @@ export interface Divisi {
 
 export interface Pengurus {
   id: string;
+  id_pengguna?: string;
+  nrp?: string;
+  email?: string;
+  no_wa?: string;
   nama: string;
   jabatan: string;
   prodi: ProdiLamongan;
@@ -164,6 +168,9 @@ export interface Pendaftaran {
 
 export interface Pengguna {
   id: string;
+  nrp?: string;
+  no_wa?: string;
+  prodi?: ProdiLamongan;
   nama: string;
   email: string;
   password?: string;

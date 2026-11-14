@@ -13,7 +13,16 @@ import {
   INITIAL_REGISTRATIONS,
   INITIAL_USERS,
 } from "@/data/initial-data";
-import { canCrudProkerWithoutPermission, generateTrackingCode } from "@/lib/utils";
+import {
+  canCrudProkerWithoutPermission,
+  canManageMembersAndPengurus,
+  detectProdiFromEmail,
+  formatNameFromCampusEmail,
+  generateTrackingCode,
+  isValidNoWa,
+  isValidNrp,
+  isValidStudentPensEmail,
+} from "@/lib/utils";
 import { isSupabaseConfigured, supabase } from "@/services/supabase-client";
 import type {
   Anggaran,
@@ -43,6 +52,7 @@ export type UIStateSimulation = "normal" | "loading" | "empty" | "error";
 const STORAGE_KEY = "himakala_portal_state_v2_dynamic";
 
 interface StoredPortalState {
+  users: Pengguna[];
   members: Pengurus[];
   prokers: Proker[];
   budgets: Anggaran[];
@@ -94,22 +104,46 @@ interface HimakalaStoreContextValue {
   // Sesi Autentikasi User Biasa vs Kepengurusan 6 Divisi (Berdasarkan Enum Database)
   currentUser: Pengguna | null;
   isKepengurusan: boolean;
+  canManageMembership: boolean;
   currentDivision: Divisi | null;
   loginWithCredentials: (
-    email: string,
+    identifier: string,
     password: string
   ) => Promise<{ ok: boolean; error?: string; user?: Pengguna }>;
+  registerMemberAccount: (payload: {
+    nama?: string;
+    nrp: string;
+    no_wa: string;
+    email: string;
+    password: string;
+    confirmPassword: string;
+    prodi?: ProdiLamongan;
+    autoLogin?: boolean;
+  }) => Promise<{ ok: boolean; error?: string; user?: Pengguna }>;
+  appointMemberAsPengurus: (payload: {
+    userId: string;
+    peran: Exclude<PeranPengguna, "anggota">;
+    id_divisi: string;
+    jabatan: string;
+    prodi?: ProdiLamongan;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  toggleMemberActiveStatus: (
+    userId: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   loginAsUser: (userId: string) => void;
   loginCustom: (nama: string, peran: PeranPengguna, divisiSlug?: DivisiSlug) => void;
   logout: () => void;
   resetAllDynamicData: () => void;
   createUserAccount: (payload: {
     nama: string;
+    nrp?: string;
+    no_wa?: string;
     email: string;
     password: string;
+    confirmPassword?: string;
     peran: PeranPengguna;
     id_divisi: string | null;
-  }) => Promise<void>;
+  }) => Promise<{ ok: boolean; error?: string }>;
   deleteUserAccount: (userId: string) => Promise<void>;
 
   // Aksi Publik / Anggota
@@ -234,7 +268,11 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
   const [registrations, setRegistrations] = useState<Pendaftaran[]>(
     initialStored.registrations ?? INITIAL_REGISTRATIONS
   );
-  const [users, setUsers] = useState<Pengguna[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<Pengguna[]>(
+    initialStored.users && initialStored.users.length > 0
+      ? initialStored.users
+      : INITIAL_USERS
+  );
   const [activityLogs, setActivityLogs] = useState<LogAktivitas[]>(
     initialStored.activityLogs ?? INITIAL_ACTIVITY_LOGS
   );
@@ -300,10 +338,14 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
               role === "ketua_himakala" || role === "sekretaris" || role === "bendahara"
                 ? "bph"
                 : matchedDiv?.slug;
+            const emailStr = String(u.email || "");
             return {
               id: String(u.id),
-              nama: String(u.nama || ""),
-              email: String(u.email || ""),
+              nrp: u.nrp ? String(u.nrp) : undefined,
+              no_wa: u.no_wa ? String(u.no_wa) : undefined,
+              prodi: (u.prodi as ProdiLamongan) || detectProdiFromEmail(emailStr),
+              nama: String(u.nama || formatNameFromCampusEmail(emailStr)),
+              email: emailStr,
               password: u.password ? String(u.password) : "himakala123",
               peran: role,
               id_divisi: u.id_divisi ? String(u.id_divisi) : null,
@@ -325,6 +367,7 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stateToSave: StoredPortalState = {
+      users,
       members,
       prokers,
       budgets,
@@ -338,6 +381,7 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
   }, [
+    users,
     members,
     prokers,
     budgets,
@@ -355,6 +399,8 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
 
   const isKepengurusan =
     currentUser !== null && currentUser.peran !== "anggota";
+
+  const canManageMembership = canManageMembersAndPengurus(currentUser?.peran);
 
   const currentDivision =
     divisions.find((d) => d.slug === currentUser?.divisi_slug || d.id === currentUser?.divisi_slug) || null;
@@ -388,24 +434,25 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
   }
 
   async function loginWithCredentials(
-    email: string,
+    identifier: string,
     password: string
   ): Promise<{ ok: boolean; error?: string; user?: Pengguna }> {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanInput = identifier.trim().toLowerCase();
     const cleanPassword = password.trim();
 
-    if (!cleanEmail || !cleanPassword) {
-      return { ok: false, error: "Email dan password wajib diisi." };
+    if (!cleanInput || !cleanPassword) {
+      return { ok: false, error: "Email / NRP dan password wajib diisi." };
     }
 
-    // 1. Cek langsung dari tabel `public.pengguna` di Supabase (berdasarkan enum `peran_pengguna`)
+    // 1. Cek langsung dari tabel `public.pengguna` di Supabase (berdasarkan email atau NRP)
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data: dbUser } = await supabase
-          .from("pengguna")
-          .select("*")
-          .ilike("email", cleanEmail)
-          .maybeSingle();
+        const isEmail = cleanInput.includes("@");
+        const query = isEmail
+          ? supabase.from("pengguna").select("*").ilike("email", cleanInput).maybeSingle()
+          : supabase.from("pengguna").select("*").eq("nrp", cleanInput).maybeSingle();
+
+        const { data: dbUser } = await query;
 
         if (dbUser) {
           const dbPass = dbUser.password ? String(dbUser.password) : "himakala123";
@@ -413,7 +460,10 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
             return { ok: false, error: "Password yang dimasukkan salah." };
           }
           if (dbUser.status_aktif === false) {
-            return { ok: false, error: "Akun pengguna sedang dinonaktifkan." };
+            return {
+              ok: false,
+              error: "Akun anggota ini berstatus nonaktif. Hubungi Ketua atau Sekretaris HIMAKALA.",
+            };
           }
 
           const role = (dbUser.peran as PeranPengguna) || "anggota";
@@ -426,25 +476,24 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
               ? "bph"
               : undefined);
 
+          const emailStr = String(dbUser.email || cleanInput);
           const loggedUser: Pengguna = {
             id: String(dbUser.id),
-            nama: String(dbUser.nama || cleanEmail),
-            email: String(dbUser.email),
+            nrp: dbUser.nrp ? String(dbUser.nrp) : undefined,
+            no_wa: dbUser.no_wa ? String(dbUser.no_wa) : undefined,
+            prodi: (dbUser.prodi as ProdiLamongan) || detectProdiFromEmail(emailStr),
+            nama: String(dbUser.nama || formatNameFromCampusEmail(emailStr)),
+            email: emailStr,
             peran: role,
             id_divisi: dbUser.id_divisi ? String(dbUser.id_divisi) : null,
             divisi_slug: resolvedSlug,
             status: "aktif",
           };
 
-          if (role === "anggota") {
-            setCurrentUser(null);
-            return { ok: true, user: loggedUser };
-          }
-
           setCurrentUser(loggedUser);
           appendLog(
             `Login sebagai ${loggedUser.nama} (${loggedUser.peran})`,
-            `divisi: ${resolvedSlug || "bph"}`,
+            `divisi: ${resolvedSlug || "anggota"}`,
             loggedUser
           );
           return { ok: true, user: loggedUser };
@@ -454,14 +503,23 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
       }
     }
 
-    // 2. Fallback cek dari daftar pengguna berdasarkan enum `peran_pengguna`
+    // 2. Fallback cek dari daftar pengguna berdasarkan email atau NRP
     const matchedLocal = users.find(
-      (u) => u.email.toLowerCase() === cleanEmail
+      (u) =>
+        u.email.toLowerCase() === cleanInput ||
+        (u.nrp && u.nrp.toLowerCase() === cleanInput)
     );
     if (!matchedLocal) {
       return {
         ok: false,
-        error: "Email tidak terdaftar di tabel pengguna.",
+        error: "Email atau NRP belum terdaftar. Silakan registrasi terlebih dahulu jika Anda anggota.",
+      };
+    }
+
+    if (matchedLocal.status === "nonaktif") {
+      return {
+        ok: false,
+        error: "Status keanggotaan Anda sedang nonaktif. Hubungi Ketua atau Sekretaris HIMAKALA.",
       };
     }
 
@@ -470,80 +528,422 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
       return { ok: false, error: "Password yang dimasukkan salah." };
     }
 
-    if (matchedLocal.peran === "anggota") {
-      setCurrentUser(null);
-      return { ok: true, user: matchedLocal };
-    }
-
     setCurrentUser(matchedLocal);
     appendLog(
       `Login sebagai ${matchedLocal.nama} (${matchedLocal.peran})`,
-      `divisi: ${matchedLocal.divisi_slug || "bph"}`,
+      `divisi: ${matchedLocal.divisi_slug || "anggota"}`,
       matchedLocal
     );
     return { ok: true, user: matchedLocal };
   }
 
-  async function createUserAccount(payload: {
-    nama: string;
+  /**
+   * Registrasi Anggota Biasa HIMAKALA (NRP, No. WA, Email Kampus @...student.pens.ac.id, Password 2 kali)
+   * Dapat digunakan oleh mahasiswa secara mandiri (autoLogin = true) maupun oleh Ketua / Sekretaris (autoLogin = false).
+   */
+  async function registerMemberAccount(payload: {
+    nama?: string;
+    nrp: string;
+    no_wa: string;
     email: string;
     password: string;
-    peran: PeranPengguna;
-    id_divisi: string | null;
-  }) {
-    const matchedDiv = divisions.find((d) => d.id === payload.id_divisi);
-    const resolvedSlug: DivisiSlug | undefined =
-      matchedDiv?.slug ||
-      (payload.peran === "ketua_himakala" ||
-      payload.peran === "sekretaris" ||
-      payload.peran === "bendahara"
-        ? "bph"
-        : undefined);
+    confirmPassword: string;
+    prodi?: ProdiLamongan;
+    autoLogin?: boolean;
+  }): Promise<{ ok: boolean; error?: string; user?: Pengguna }> {
+    const cleanNrp = payload.nrp.trim();
+    const cleanWa = payload.no_wa.replace(/[\s-]/g, "").trim();
+    const cleanEmail = payload.email.trim().toLowerCase();
+    const pass1 = payload.password.trim();
+    const pass2 = payload.confirmPassword.trim();
 
-    const newUser: Pengguna = {
+    // Jika dipanggil dari panel admin (autoLogin === false), pastikan hanya Ketua atau Sekretaris yang boleh menambah anggota
+    if (payload.autoLogin === false && !canManageMembersAndPengurus(currentUser?.peran)) {
+      return {
+        ok: false,
+        error: "Hanya Ketua HIMAKALA dan Sekretaris yang dapat menambahkan anggota.",
+      };
+    }
+
+    if (!isValidNrp(cleanNrp)) {
+      return {
+        ok: false,
+        error: "NRP wajib berupa angka 8 hingga 14 digit (contoh: 3125500001).",
+      };
+    }
+
+    if (!isValidNoWa(cleanWa)) {
+      return {
+        ok: false,
+        error: "Nomor WhatsApp tidak valid (contoh: 081234567890).",
+      };
+    }
+
+    if (!isValidStudentPensEmail(cleanEmail)) {
+      return {
+        ok: false,
+        error:
+          "Wajib menggunakan email kampus mahasiswa PENS (contoh: mozakiibrahim@it.student.pens.ac.id).",
+      };
+    }
+
+    if (pass1.length < 6) {
+      return {
+        ok: false,
+        error: "Password minimal terdiri dari 6 karakter.",
+      };
+    }
+
+    if (pass1 !== pass2) {
+      return {
+        ok: false,
+        error: "Konfirmasi password (input password ke-2) tidak sama.",
+      };
+    }
+
+    const duplicateEmail = users.some(
+      (u) => u.email.toLowerCase() === cleanEmail
+    );
+    if (duplicateEmail) {
+      return {
+        ok: false,
+        error: "Email kampus tersebut sudah terdaftar sebagai anggota.",
+      };
+    }
+
+    const duplicateNrp = users.some((u) => u.nrp === cleanNrp);
+    if (duplicateNrp) {
+      return {
+        ok: false,
+        error: "NRP tersebut sudah terdaftar sebagai anggota.",
+      };
+    }
+
+    const resolvedNama =
+      payload.nama && payload.nama.trim().length >= 2
+        ? payload.nama.trim()
+        : formatNameFromCampusEmail(cleanEmail);
+    const resolvedProdi = payload.prodi || detectProdiFromEmail(cleanEmail);
+
+    const newMember: Pengguna = {
       id: `usr-${Date.now()}`,
-      nama: payload.nama.trim(),
-      email: payload.email.trim().toLowerCase(),
-      password: payload.password.trim() || "himakala123",
-      peran: payload.peran,
-      id_divisi: payload.id_divisi,
-      divisi_slug: resolvedSlug,
+      nrp: cleanNrp,
+      no_wa: cleanWa,
+      prodi: resolvedProdi,
+      nama: resolvedNama,
+      email: cleanEmail,
+      password: pass1,
+      peran: "anggota",
+      id_divisi: null,
+      divisi_slug: undefined,
       status: "aktif",
     };
 
-    setUsers((prev) => [...prev, newUser]);
+    setUsers((prev) => [newMember, ...prev]);
     appendLog(
-      `Tambah akun pengguna: ${newUser.email} (${newUser.peran})`,
-      `pengguna: ${newUser.email}`
+      `Registrasi Anggota Aktif HIMAKALA: ${newMember.nama} (${newMember.nrp})`,
+      `anggota: ${newMember.email}`,
+      payload.autoLogin === false ? currentUser : newMember
     );
 
     if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from("pengguna")
-        .insert([
-          {
-            nama: newUser.nama,
-            email: newUser.email,
-            password: newUser.password,
-            peran: newUser.peran,
-            id_divisi: payload.id_divisi,
-            status_aktif: true,
-          },
-        ])
-        .select("*")
-        .maybeSingle();
+      try {
+        const { data } = await supabase
+          .from("pengguna")
+          .insert([
+            {
+              nama: newMember.nama,
+              nrp: newMember.nrp,
+              no_wa: newMember.no_wa,
+              prodi: newMember.prodi,
+              email: newMember.email,
+              password: newMember.password,
+              peran: "anggota",
+              id_divisi: null,
+              status_aktif: true,
+            },
+          ])
+          .select("*")
+          .maybeSingle();
 
-      if (data?.id) {
-        setUsers((prev) =>
-          prev.map((u) => (u.email === newUser.email ? { ...u, id: String(data.id) } : u))
-        );
+        if (data?.id) {
+          newMember.id = String(data.id);
+          setUsers((prev) =>
+            prev.map((u) => (u.email === newMember.email ? { ...u, id: String(data.id) } : u))
+          );
+        }
+      } catch (err) {
+        console.warn("Insert registrasi anggota ke Supabase fallback ke kolom dasar:", err);
+        await supabase
+          .from("pengguna")
+          .insert([
+            {
+              nama: newMember.nama,
+              email: newMember.email,
+              password: newMember.password,
+              peran: "anggota",
+              id_divisi: null,
+              status_aktif: true,
+            },
+          ]);
       }
     }
+
+    if (payload.autoLogin !== false) {
+      setCurrentUser(newMember);
+    }
+
+    return { ok: true, user: newMember };
+  }
+
+  /**
+   * Mengangkat Anggota Aktif HIMAKALA menjadi Pengurus HIMAKALA.
+   * Syarat mutlak:
+   * 1. Hanya Ketua HIMAKALA (`ketua_himakala`) dan Sekretaris (`sekretaris`) yang berhak mengangkat pengurus.
+   * 2. Calon pengurus wajib terdaftar sebagai Anggota Aktif HIMAKALA (`status === "aktif"`).
+   */
+  async function appointMemberAsPengurus(payload: {
+    userId: string;
+    peran: Exclude<PeranPengguna, "anggota">;
+    id_divisi: string;
+    jabatan: string;
+    prodi?: ProdiLamongan;
+  }): Promise<{ ok: boolean; error?: string }> {
+    if (!canManageMembersAndPengurus(currentUser?.peran)) {
+      return {
+        ok: false,
+        error: "Hanya Ketua HIMAKALA dan Sekretaris yang dapat mengangkat pengurus.",
+      };
+    }
+
+    const candidate = users.find((u) => u.id === payload.userId);
+    if (!candidate) {
+      return {
+        ok: false,
+        error: "Calon pengurus tidak ditemukan di daftar Anggota HIMAKALA.",
+      };
+    }
+
+    if (candidate.status !== "aktif") {
+      return {
+        ok: false,
+        error:
+          "Syarat menjadi pengurus HIMAKALA adalah harus berstatus Anggota Aktif HIMAKALA terlebih dahulu.",
+      };
+    }
+
+    const matchedDiv =
+      divisions.find((d) => d.id === payload.id_divisi) || divisions[0];
+    const resolvedSlug: DivisiSlug =
+      payload.peran === "ketua_himakala" ||
+      payload.peran === "sekretaris" ||
+      payload.peran === "bendahara"
+        ? "bph"
+        : matchedDiv?.slug || "bph";
+    const resolvedDivId =
+      divisions.find((d) => d.slug === resolvedSlug)?.id || payload.id_divisi;
+    const resolvedProdi =
+      payload.prodi || candidate.prodi || detectProdiFromEmail(candidate.email);
+    const resolvedJabatan = payload.jabatan.trim() || "Pengurus Divisi";
+
+    // 1. Perbarui role (`peran_pengguna`) & divisi pada akun anggota aktif
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === candidate.id
+          ? {
+              ...u,
+              peran: payload.peran,
+              id_divisi: resolvedDivId,
+              divisi_slug: resolvedSlug,
+              prodi: resolvedProdi,
+            }
+          : u
+      )
+    );
+
+    // 2. Tambahkan atau perbarui pada daftar struktur Pengurus 6 Divisi (`public.pengurus`)
+    const existingPengurus = members.find(
+      (m) =>
+        m.id_pengguna === candidate.id ||
+        (candidate.nrp && m.nrp === candidate.nrp) ||
+        m.nama.toLowerCase() === candidate.nama.toLowerCase()
+    );
+
+    if (existingPengurus) {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === existingPengurus.id
+            ? {
+                ...m,
+                id_pengguna: candidate.id,
+                nrp: candidate.nrp,
+                email: candidate.email,
+                no_wa: candidate.no_wa,
+                nama: candidate.nama,
+                jabatan: resolvedJabatan,
+                prodi: resolvedProdi,
+                id_divisi: resolvedDivId,
+              }
+            : m
+        )
+      );
+    } else {
+      const createdPengurus: Pengurus = {
+        id: `mem-${Date.now()}`,
+        id_pengguna: candidate.id,
+        nrp: candidate.nrp,
+        email: candidate.email,
+        no_wa: candidate.no_wa,
+        nama: candidate.nama,
+        jabatan: resolvedJabatan,
+        prodi: resolvedProdi,
+        id_divisi: resolvedDivId,
+        status_verifikasi: true,
+        id_periode: selectedPeriodId,
+      };
+      setMembers((prev) => [...prev, createdPengurus]);
+
+      if (isSupabaseConfigured && supabase) {
+        supabase
+          .from("pengurus")
+          .insert([
+            {
+              nama: createdPengurus.nama,
+              jabatan: createdPengurus.jabatan,
+              prodi: createdPengurus.prodi,
+              id_divisi: createdPengurus.id_divisi,
+              id_periode: createdPengurus.id_periode,
+              status_verifikasi: true,
+            },
+          ])
+          .then();
+      }
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      await supabase
+        .from("pengguna")
+        .update({
+          peran: payload.peran,
+          id_divisi: resolvedDivId,
+        })
+        .eq("email", candidate.email);
+    }
+
+    appendLog(
+      `Mengangkat Anggota Aktif ${candidate.nama} (${candidate.nrp || candidate.email}) menjadi ${resolvedJabatan}`,
+      `pengurus: ${candidate.email}`
+    );
+
+    return { ok: true };
+  }
+
+  /**
+   * Mengubah status keanggotaan (Aktif <-> Nonaktif) oleh Ketua HIMAKALA atau Sekretaris.
+   * Jika anggota dinonaktifkan, jabatan kepengurusannya otomatis dicabut karena syarat pengurus adalah Anggota Aktif.
+   */
+  async function toggleMemberActiveStatus(
+    userId: string
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!canManageMembersAndPengurus(currentUser?.peran)) {
+      return {
+        ok: false,
+        error: "Hanya Ketua HIMAKALA dan Sekretaris yang dapat mengubah status keanggotaan.",
+      };
+    }
+
+    const target = users.find((u) => u.id === userId);
+    if (!target) {
+      return { ok: false, error: "Data anggota tidak ditemukan." };
+    }
+
+    const nextStatus = target.status === "aktif" ? "nonaktif" : "aktif";
+
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === userId
+          ? {
+              ...u,
+              status: nextStatus,
+              // Bila tidak lagi menjadi anggota aktif, otomatis kembali menjadi anggota biasa
+              peran: nextStatus === "nonaktif" ? "anggota" : u.peran,
+              id_divisi: nextStatus === "nonaktif" ? null : u.id_divisi,
+              divisi_slug: nextStatus === "nonaktif" ? undefined : u.divisi_slug,
+            }
+          : u
+      )
+    );
+
+    if (nextStatus === "nonaktif") {
+      setMembers((prev) =>
+        prev.filter(
+          (m) =>
+            m.id_pengguna !== userId &&
+            m.nama.toLowerCase() !== target.nama.toLowerCase()
+        )
+      );
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      await supabase
+        .from("pengguna")
+        .update({
+          status_aktif: nextStatus === "aktif",
+          ...(nextStatus === "nonaktif" ? { peran: "anggota", id_divisi: null } : {}),
+        })
+        .eq("email", target.email);
+    }
+
+    appendLog(
+      `Mengubah status keanggotaan ${target.nama} menjadi ${nextStatus.toUpperCase()}`,
+      `anggota: ${target.email}`
+    );
+
+    return { ok: true };
+  }
+
+  async function createUserAccount(payload: {
+    nama: string;
+    nrp?: string;
+    no_wa?: string;
+    email: string;
+    password: string;
+    confirmPassword?: string;
+    peran: PeranPengguna;
+    id_divisi: string | null;
+  }): Promise<{ ok: boolean; error?: string }> {
+    if (!canManageMembersAndPengurus(currentUser?.peran)) {
+      return {
+        ok: false,
+        error: "Hanya Ketua HIMAKALA dan Sekretaris yang dapat menambah anggota.",
+      };
+    }
+
+    return registerMemberAccount({
+      nama: payload.nama,
+      nrp: payload.nrp || "",
+      no_wa: payload.no_wa || "",
+      email: payload.email,
+      password: payload.password,
+      confirmPassword: payload.confirmPassword ?? payload.password,
+      autoLogin: false,
+    });
   }
 
   async function deleteUserAccount(userId: string) {
+    if (!canManageMembersAndPengurus(currentUser?.peran)) return;
+    const target = users.find((u) => u.id === userId);
     setUsers((prev) => prev.filter((u) => u.id !== userId));
-    appendLog("Menghapus akun pengguna", `pengguna: ${userId}`);
+    if (target) {
+      setMembers((prev) =>
+        prev.filter(
+          (m) =>
+            m.id_pengguna !== userId &&
+            m.nama.toLowerCase() !== target.nama.toLowerCase()
+        )
+      );
+    }
+    appendLog("Menghapus akun anggota", `pengguna: ${userId}`);
     if (isSupabaseConfigured && supabase) {
       await supabase.from("pengguna").delete().eq("id", userId);
     }
@@ -1164,17 +1564,34 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
     prodi: ProdiLamongan;
     id_divisi: string;
   }) {
+    // Hanya Ketua HIMAKALA dan Sekretaris yang dapat menambah pengurus,
+    // dan calon pengurus wajib sudah terdaftar sebagai Anggota Aktif HIMAKALA
+    if (!canManageMembersAndPengurus(currentUser?.peran)) return;
+
+    const activeMember = users.find(
+      (u) =>
+        u.status === "aktif" &&
+        (u.nama.toLowerCase() === payload.nama.trim().toLowerCase() ||
+          u.email.toLowerCase() === payload.nama.trim().toLowerCase() ||
+          u.nrp === payload.nama.trim())
+    );
+    if (!activeMember) return;
+
     const created: Pengurus = {
       id: `mem-${Date.now()}`,
-      nama: payload.nama.trim(),
+      id_pengguna: activeMember.id,
+      nrp: activeMember.nrp,
+      email: activeMember.email,
+      no_wa: activeMember.no_wa,
+      nama: activeMember.nama,
       jabatan: payload.jabatan.trim(),
-      prodi: payload.prodi,
+      prodi: payload.prodi || activeMember.prodi || "Teknik Informatika",
       id_divisi: payload.id_divisi,
       status_verifikasi: true,
       id_periode: selectedPeriodId,
     };
     setMembers((prev) => [...prev, created]);
-    appendLog(`Tambah pengurus: ${created.nama}`, `pengurus: ${created.nama}`);
+    appendLog(`Tambah pengurus dari Anggota Aktif: ${created.nama}`, `pengurus: ${created.nama}`);
 
     if (isSupabaseConfigured && supabase) {
       supabase.from("pengurus").insert([{
@@ -1189,8 +1606,19 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
   }
 
   function deleteMember(memberId: string) {
+    if (!canManageMembersAndPengurus(currentUser?.peran)) return;
+    const target = members.find((m) => m.id === memberId);
     setMembers((prev) => prev.filter((m) => m.id !== memberId));
-    appendLog("Menghapus pengurus", `pengurus: ${memberId}`);
+    if (target?.id_pengguna) {
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === target.id_pengguna
+            ? { ...u, peran: "anggota", id_divisi: null, divisi_slug: undefined }
+            : u
+        )
+      );
+    }
+    appendLog("Memberhentikan pengurus kembali menjadi Anggota Aktif", `pengurus: ${memberId}`);
     if (isSupabaseConfigured && supabase) {
       supabase.from("pengurus").delete().eq("id", memberId).then();
     }
@@ -1221,8 +1649,12 @@ export function HimakalaStoreProvider({ children }: { children: React.ReactNode 
         isCloudConnected: isSupabaseConfigured,
         currentUser,
         isKepengurusan,
+        canManageMembership,
         currentDivision,
         loginWithCredentials,
+        registerMemberAccount,
+        appointMemberAsPengurus,
+        toggleMemberActiveStatus,
         loginAsUser,
         loginCustom,
         logout,

@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   canCrudProkerWithoutPermission,
+  canManageMembersAndPengurus,
+  detectProdiFromEmail,
+  formatNameFromCampusEmail,
   formatRupiah,
   generateTrackingCode,
   getInitials,
   getRoleLabel,
+  isValidNoWa,
+  isValidNrp,
+  isValidStudentPensEmail,
 } from "../src/lib/utils";
 import {
   INITIAL_ASPIRATIONS,
@@ -134,5 +140,41 @@ describe("HIMAKALA Dynamic RBAC & 6 Divisions Verification Suite", () => {
     expect(filtered).toHaveLength(1);
     expect(filtered[0].name).toBe("Krisna Machmud Irfandi");
     expect(filtered[0].instagram).toBeNull();
+  });
+
+  it("memvalidasi registrasi anggota biasa menggunakan Email Kampus PENS, NRP, dan No. WA", () => {
+    expect(isValidStudentPensEmail("mozakiibrahim@it.student.pens.ac.id")).toBe(
+      true
+    );
+    expect(isValidStudentPensEmail("mahasiswa@mmb.student.pens.ac.id")).toBe(
+      true
+    );
+    expect(isValidStudentPensEmail("mahasiswa@student.pens.ac.id")).toBe(true);
+    expect(isValidStudentPensEmail("mozakiibrahim@gmail.com")).toBe(false);
+
+    expect(isValidNrp("3124500021")).toBe(true);
+    expect(isValidNrp("12345")).toBe(false);
+
+    expect(isValidNoWa("0812-3456-7890")).toBe(true);
+    expect(isValidNoWa("123")).toBe(false);
+
+    expect(detectProdiFromEmail("mozakiibrahim@it.student.pens.ac.id")).toBe(
+      "Teknik Informatika"
+    );
+    expect(detectProdiFromEmail("budi@mmb.student.pens.ac.id")).toBe(
+      "Multimedia Broadcasting"
+    );
+    expect(
+      formatNameFromCampusEmail("mozakiibrahim@it.student.pens.ac.id")
+    ).toBe("Mozakiibrahim");
+  });
+
+  it("membatasi hak menambah anggota dan mengangkat pengurus HIMAKALA hanya untuk Ketua HIMAKALA dan Sekretaris", () => {
+    expect(canManageMembersAndPengurus("ketua_himakala")).toBe(true);
+    expect(canManageMembersAndPengurus("sekretaris")).toBe(true);
+    expect(canManageMembersAndPengurus("bendahara")).toBe(false);
+    expect(canManageMembersAndPengurus("ketua_divisi")).toBe(false);
+    expect(canManageMembersAndPengurus("pengurus_divisi")).toBe(false);
+    expect(canManageMembersAndPengurus("anggota")).toBe(false);
   });
 });
