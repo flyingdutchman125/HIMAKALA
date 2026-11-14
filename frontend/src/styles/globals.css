@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: "Outfit", system-ui, -apple-system, sans-serif;
+    color: #0b1938;
+    background-color: #dce7f3;
+    scroll-behavior: smooth;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  /* R-39: Setiap elemen interaktif aktif wajib memiliki cursor: pointer */
+  a[href],
+  button:not(:disabled),
+  summary,
+  select:not(:disabled),
+  label[for],
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="switch"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  textarea:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  /* R-32: Indikator fokus keyboard yang jelas dan kontras tinggi (> 15:1) */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  summary:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2.5px solid #0b1938;
+    outline-offset: 2px;
+  }
+}
+
+/* R-39: Matikan animasi non-esensial pada prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer components {
+  .ink-border {
+    border: 1.5px solid #0b1938;
+  }
+
+  .ink-card {
+    border: 1.5px solid #0b1938;
+    border-radius: 20px;
+  }
+
+  .pill-tag {
+    border: 1.5px solid #0b1938;
+    border-radius: 9999px;
+  }
+}
+
