@@ -1,7 +1,8 @@
 <div align="center">
 
-  <img src="frontend/src/assets/himakala-logo.png" alt="Logo HIMAKALA PSDKU Lamongan" width="130" style="margin-bottom: 12px;" />
-  <img src="frontend/src/assets/pens-logo.png" alt="Logo PENS" width="130" style="margin-bottom: 12px; margin-left: 16px;" />
+  <img src="frontend/src/assets/himakala-logo.png" alt="Logo HIMAKALA PSDKU Lamongan" width="105" height="105" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="frontend/src/assets/pens-logo.png" alt="Logo PENS" width="105" height="105" />
 
   # HIMAKALA PSDKU Lamongan
   ### Portal Transparansi & Sistem Informasi Himpunan Mahasiswa PENS
